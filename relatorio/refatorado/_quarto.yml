@@ -1,10 +1,7 @@
 project:
-  type: website
   output-dir: _site
-
-website:
-  title: "Cirurgias Dermatológicas em Nonagenários"
-  navbar: false
+  render:
+    - index.qmd
 
 format:
   html:
