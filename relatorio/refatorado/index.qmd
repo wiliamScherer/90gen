@@ -838,66 +838,69 @@ Com só `r n_compl` complicações, não dá pra colocar muitas variáveis no mo
 
 ```{r}
 #| label: modelo-complicacao
-
-n_compl <- sum(lesoes_analise$teve_complicacao, na.rm = TRUE)
-
-lesoes_modelo <- lesoes_biv |>
-  dplyr::filter(!is.na(fech_simples), !is.na(tipo_label))
-
-if (n_compl >= 8) {
-  mod_compl <- glm(
-    teve_complicacao ~ fech_simples + tipo_label,
-    data = lesoes_modelo,
-    family = binomial(link = "logit")
-  )
-
-  tbl_mod <- mod_compl |>
-    gtsummary::tbl_regression(
-      exponentiate = TRUE,
-      label = list(
-        fech_simples ~ "Técnica de fechamento",
-        tipo_label ~ "Tipo histológico"
+res <- try({
+    n_compl <- sum(lesoes_analise$teve_complicacao, na.rm = TRUE)
+    
+    lesoes_modelo <- lesoes_biv |>
+      dplyr::filter(!is.na(fech_simples), !is.na(tipo_label))
+    
+    if (n_compl >= 8) {
+      mod_compl <- glm(
+        teve_complicacao ~ fech_simples + tipo_label,
+        data = lesoes_modelo,
+        family = binomial(link = "logit")
       )
-    ) |>
-    # Referência: OR=1, IC=NA (vai aparecer como "—")
-    gtsummary::modify_table_body(~ .x |>
-      dplyr::mutate(
-        estimate  = dplyr::if_else(.data$reference_row %in% TRUE, 1, .data$estimate),
-        conf.low  = dplyr::if_else(.data$reference_row %in% TRUE, NA_real_, .data$conf.low),
-        conf.high = dplyr::if_else(.data$reference_row %in% TRUE, NA_real_, .data$conf.high)
-      )
-    ) |>
-    # IC com hífen (só onde tem valor)
-    gtsummary::modify_column_merge(
-      pattern = "{conf.low} - {conf.high}",
-      rows = !is.na(.data$conf.low)
-    ) |>
-    gtsummary::modify_column_hide(columns = "conf.high") |>
-    gtsummary::modify_header(
-      label ~ "**Característica**",
-      estimate ~ "**OR**",
-      conf.low ~ "**IC 95%**",
-      p.value ~ "**p-valor**"
-    ) |>
-    # Notas de rodapé
-    gtsummary::modify_footnote(estimate ~ "OR: odds ratio (razão de chances)") |>
-    gtsummary::modify_footnote(conf.low ~ "IC 95%: intervalo de confiança de 95% (limite inferior – limite superior)") |>
-    gtsummary::modify_footnote(p.value ~ "Teste de Wald; modelo ajustado para técnica de fechamento e tipo histológico") |>
-    gtsummary::bold_p(t = 0.05) |>
-    gtsummary::bold_labels()
-
-  tbl_mod |>
-    gtsummary::as_gt() |>
-    gt::tab_header(
-      title = "Modelo multivariado: complicações",
-      subtitle = "Regressão logística, resultado em OR ajustado (IC 95%)"
-    ) |>
-    gt::rm_source_notes()
-
-} else {
-  cat("N de eventos muito pequeno para modelo multivariado confiável")
+    
+      tbl_mod <- mod_compl |>
+        gtsummary::tbl_regression(
+          exponentiate = TRUE,
+          label = list(
+            fech_simples ~ "Técnica de fechamento",
+            tipo_label ~ "Tipo histológico"
+          )
+        ) |>
+        # Referência: OR=1, IC=NA (vai aparecer como "—")
+        gtsummary::modify_table_body(~ .x |>
+          dplyr::mutate(
+            estimate  = dplyr::if_else(.data$reference_row %in% TRUE, 1, .data$estimate),
+            conf.low  = dplyr::if_else(.data$reference_row %in% TRUE, NA_real_, .data$conf.low),
+            conf.high = dplyr::if_else(.data$reference_row %in% TRUE, NA_real_, .data$conf.high)
+          )
+        ) |>
+        # IC com hífen (só onde tem valor)
+        gtsummary::modify_column_merge(
+          pattern = "{conf.low} - {conf.high}",
+          rows = !is.na(.data$conf.low)
+        ) |>
+        gtsummary::modify_column_hide(columns = "conf.high") |>
+        gtsummary::modify_header(
+          label ~ "**Característica**",
+          estimate ~ "**OR**",
+          conf.low ~ "**IC 95%**",
+          p.value ~ "**p-valor**"
+        ) |>
+        # Notas de rodapé
+        gtsummary::modify_footnote(estimate ~ "OR: odds ratio (razão de chances)") |>
+        gtsummary::modify_footnote(conf.low ~ "IC 95%: intervalo de confiança de 95% (limite inferior – limite superior)") |>
+        gtsummary::modify_footnote(p.value ~ "Teste de Wald; modelo ajustado para técnica de fechamento e tipo histológico") |>
+        gtsummary::bold_p(t = 0.05) |>
+        gtsummary::bold_labels()
+    
+      tbl_mod |>
+        gtsummary::as_gt() |>
+        gt::tab_header(
+          title = "Modelo multivariado: complicações",
+          subtitle = "Regressão logística, resultado em OR ajustado (IC 95%)"
+        ) |>
+        gt::rm_source_notes()
+    
+    } else {
+      cat("N de eventos muito pequeno para modelo multivariado confiável")
+    }
+}, silent = TRUE)
+if (inherits(res, "try-error")) {
+  cat("Erro ao ajustar o modelo multivariado:", conditionMessage(attr(res, "condition")))
 }
-
 ```
 
 ::: callout-tip
