@@ -83,8 +83,8 @@ source(file.path(renv_root, "scripts", "97_Colori.R"))
 # ============================================================================
 # DADOS
 # ============================================================================
-pacientes_path <- file.path(renv_root, "data", "derived", "pacientes.rds")
-lesoes_path    <- file.path(renv_root, "data", "derived", "lesoes.rds")
+pacientes_path <- file.path("pacientes.rds")
+lesoes_path    <- file.path("lesoes.rds")
 
 stopifnot(file.exists(pacientes_path), file.exists(lesoes_path))
 
