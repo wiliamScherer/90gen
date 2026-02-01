@@ -63,3 +63,9 @@ catastrofe.tsv
 Icon?
 
 data/raw/
+
+**/_site/
+**/figs/
+# Quarto outputs
+**/_site/
+**/figs/
