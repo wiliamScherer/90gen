@@ -839,6 +839,8 @@ Com só `r n_compl` complicações, não dá pra colocar muitas variáveis no mo
 ```{r}
 #| label: modelo-complicacao
 
+n_compl <- sum(lesoes_analise$teve_complicacao, na.rm = TRUE)
+
 lesoes_modelo <- lesoes_biv |>
   dplyr::filter(!is.na(fech_simples), !is.na(tipo_label))
 
