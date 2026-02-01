@@ -51,6 +51,7 @@ library(htmltools)
 library(flextable)
 library(broom)
 library(ggtext)
+library(broom.helpers)
 
 # ============================================================================
 # RAIZ DO PROJETO
