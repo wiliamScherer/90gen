@@ -1,0 +1,600 @@
+---
+title: "Cirurgias Dermatológicas em Nonagenários"
+subtitle: "Estudo exploratório de exérese de câncer de pele em pacientes ≥90 anos"
+author: "Jinfy Maria dos Santos Goedert"
+date: today
+date-format: "DD/MM/YYYY"
+lang: pt-BR
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-title: "Sumário"
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver código"
+    fig-width: 8
+    fig-height: 5
+    fig-dpi: 150
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# Dependências
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+library(gtsummary)
+library(gt)
+library(scales)
+
+# Dados
+pacientes <- readRDS("../data/derived/pacientes.rds")
+lesoes <- readRDS("../data/derived/lesoes.rds")
+
+# Tema global para gráficos
+theme_set(
+
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      plot.subtitle = element_text(color = "gray40"),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+)
+
+# Paleta de cores
+cores <- c(
+  cbc = "#2E86AB",
+  cec = "#A23B72",
+  fem = "#E85D75",
+  masc = "#4A90A4"
+)
+```
+
+# Introdução
+
+## Objetivo
+
+Este documento apresenta a **análise descritiva** dos dados de cirurgias dermatológicas realizadas em pacientes com 90 anos ou mais. O foco é exploratório e epidemiológico, servindo de base para formulação de hipóteses e definição das análises subsequentes.
+
+## Premissas
+
+-   Os dados já foram submetidos a normalização, padronização semântica e anonimização.
+-   Não há modificação do dataset durante esta análise.
+-   Todas as análises são **descritivas** — não há testes inferenciais nesta etapa.
+
+## Unidades de Análise
+
+| Unidade | Definição | N |
+|--------------|-------------------------------|----------------|
+| **Paciente** | Indivíduo único, pode ter múltiplas lesões | `r nrow(pacientes)` |
+| **Lesão** | Evento cirúrgico individual | `r nrow(lesoes)` |
+
+A separação entre níveis é fundamental para evitar interpretações inadequadas.
+
+------------------------------------------------------------------------
+
+# Nível Paciente
+
+## Perfil Demográfico
+
+```{r}
+#| label: tbl-demografica
+#| tbl-cap: "Características demográficas e clínicas dos pacientes"
+
+pacientes |>
+  mutate(
+    sexo_label = factor(sexo, c("f", "m"), c("Feminino", "Masculino")),
+    fototipo = factor(fototipo)
+  ) |>
+  select(
+    idade, sexo_label, fototipo,
+    cbc_cec_previo, mohs, mais_cx, obito
+  ) |>
+  tbl_summary(
+    label = list(
+      idade ~ "Idade (anos)",
+      sexo_label ~ "Sexo",
+      fototipo ~ "Fototipo (Fitzpatrick)",
+      cbc_cec_previo ~ "Histórico de CBC/CEC",
+      mohs ~ "Cirurgia de Mohs",
+      mais_cx ~ "Cirurgias prévias adicionais",
+      obito ~ "Óbito durante seguimento"
+    ),
+    statistic = list(
+      all_continuous() ~ "{median} ({p25}–{p75})",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(
+      all_continuous() ~ 1,
+      all_categorical() ~ c(0, 1)
+    ),
+    missing = "no"
+  ) |>
+  bold_labels() |>
+  as_gt() |>
+  tab_header(
+    title = "Tabela 1",
+    subtitle = md("Características dos pacientes (N = {nrow(pacientes)})" |> glue::glue())
+  )
+```
+
+```{r}
+#| label: fig-idade
+#| fig-cap: "Distribuição da idade dos pacientes"
+
+pacientes |>
+  ggplot(aes(x = idade)) +
+  geom_histogram(binwidth = 1, fill = cores["cbc"], color = "white", alpha = 0.8) +
+  geom_vline(
+    xintercept = median(pacientes$idade),
+    linetype = "dashed", color = "gray30", linewidth = 0.8
+  ) +
+  annotate(
+    "text",
+    x = median(pacientes$idade) + 0.5,
+    y = Inf, vjust = 2, hjust = 0,
+    label = paste0("Mediana: ", median(pacientes$idade), " anos"),
+    size = 3.5, color = "gray30"
+  ) +
+  scale_x_continuous(breaks = seq(90, 110, 2)) +
+  labs(
+    x = "Idade (anos)",
+    y = "Número de pacientes",
+    title = "Distribuição etária",
+    subtitle = "Pacientes submetidos a exérese de câncer de pele"
+  )
+```
+
+## Comorbidades
+
+```{r}
+#| label: fig-comorbidades
+#| fig-cap: "Prevalência das principais comorbidades"
+
+# Lista de comorbidades para análise
+comorb_cols <- c("has", "dm", "dlp", "ic", "fa", "drc", "alzheimer", "parkinson", "dpoc")
+comorb_labels <- c(
+  has = "Hipertensão", dm = "Diabetes", dlp = "Dislipidemia",
+  ic = "Insuf. cardíaca", fa = "Fibrilação atrial", drc = "Doença renal crônica",
+  alzheimer = "Alzheimer", parkinson = "Parkinson", dpoc = "DPOC"
+)
+
+# Calcula prevalências
+comorb_prev <- pacientes |>
+  summarise(across(all_of(comorb_cols), ~ sum(.x, na.rm = TRUE))) |>
+  pivot_longer(everything(), names_to = "comorbidade", values_to = "n") |>
+  mutate(
+    pct = n / nrow(pacientes) * 100,
+    label = comorb_labels[comorbidade],
+    label = fct_reorder(label, pct)
+  )
+
+comorb_prev |>
+  ggplot(aes(x = label, y = pct)) +
+  geom_col(fill = cores["cbc"], width = 0.7) +
+  geom_text(aes(label = sprintf("%.0f%%", pct)), hjust = -0.2, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 100), labels = \(x) paste0(x, "%")) +
+  labs(
+    x = NULL,
+    y = "Prevalência",
+    title = "Comorbidades mais frequentes",
+    subtitle = paste0("N = ", nrow(pacientes), " pacientes")
+  )
+```
+
+## Carga de Lesões por Paciente
+
+```{r}
+#| label: tbl-carga-lesoes
+#| tbl-cap: "Distribuição do número de lesões por paciente"
+
+lesoes_por_pac <- lesoes |>
+  count(paciente, name = "n_lesoes") |>
+  count(n_lesoes, name = "n_pacientes") |>
+  mutate(
+    pct = n_pacientes / sum(n_pacientes) * 100,
+    pct_fmt = sprintf("%.1f%%", pct)
+  )
+
+lesoes_por_pac |>
+  select(`Nº de lesões` = n_lesoes, `Pacientes (n)` = n_pacientes, `%` = pct_fmt) |>
+  gt() |>
+  tab_header(
+    title = "Lesões por paciente",
+    subtitle = "Distribuição da carga tumoral"
+  ) |>
+  cols_align(align = "center")
+```
+
+```{r}
+#| label: resumo-carga
+
+n_unica <- lesoes_por_pac$n_pacientes[lesoes_por_pac$n_lesoes == 1]
+n_multiplas <- sum(lesoes_por_pac$n_pacientes[lesoes_por_pac$n_lesoes > 1])
+pct_multiplas <- n_multiplas / nrow(pacientes) * 100
+```
+
+::: callout-note
+## Observação metodológica
+
+**`r n_multiplas`** pacientes (**`r sprintf("%.1f", pct_multiplas)`%**) apresentam múltiplas lesões. Análises no nível lesão devem considerar a correlação intra-paciente.
+:::
+
+------------------------------------------------------------------------
+
+# Nível Lesão
+
+### Tipo Histológico
+
+```{r}
+#| label: fig-tipo-histo
+#| fig-cap: "Distribuição por tipo histológico"
+
+lesoes |>
+  filter(!is.na(histo_tipo)) |>
+  count(histo_tipo) |>
+  mutate(
+    pct = n / sum(n) * 100,
+    label = toupper(histo_tipo),
+    label = fct_reorder(label, n, .desc = TRUE)
+  ) |>
+  ggplot(aes(x = label, y = n, fill = histo_tipo)) +
+  geom_col(width = 0.5) +
+  geom_text(
+    aes(label = sprintf("%d\n(%.1f%%)", n, pct)),
+    vjust = -0.3, size = 4, fontface = "bold"
+  ) +
+  scale_fill_manual(values = cores[c("cbc", "cec")], guide = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    x = NULL,
+    y = "Número de lesões",
+    title = "Tipo histológico",
+    subtitle = paste0("Total: ", nrow(lesoes), " lesões")
+  )
+```
+
+## Subtipos de CBC
+
+```{r}
+#| label: fig-subtipos-cbc
+#| fig-cap: "Subtipos histológicos de Carcinoma Basocelular"
+
+lesoes |>
+  filter(histo_tipo == "cbc", !is.na(histo_subtipo), histo_subtipo != "") |>
+  separate_rows(histo_subtipo, sep = ", ") |>
+  count(histo_subtipo) |>
+  mutate(histo_subtipo = fct_reorder(histo_subtipo, n)) |>
+  ggplot(aes(x = histo_subtipo, y = n)) +
+  geom_col(fill = cores["cbc"], width = 0.7) +
+  geom_text(aes(label = n), hjust = -0.3, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    x = NULL,
+    y = "Frequência",
+    title = "Subtipos de CBC",
+    subtitle = "Nota: um tumor pode ter mais de um subtipo"
+  )
+```
+
+## Comportamento do CEC
+
+```{r}
+#| label: tbl-cec-comportamento
+#| tbl-cap: "Características do Carcinoma Espinocelular"
+
+lesoes |>
+  filter(histo_tipo == "cec") |>
+  select(histo_difer, comport) |>
+  tbl_summary(
+    label = list(
+      histo_difer ~ "Grau de diferenciação",
+      comport ~ "Comportamento"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    missing_text = "Não especificado"
+  ) |>
+  bold_labels() |>
+  as_gt() |>
+  tab_header(
+    title = "Características do CEC",
+    subtitle = md("N = {sum(lesoes$histo_tipo == 'cec', na.rm = TRUE)} lesões" |> glue::glue())
+  )
+```
+
+## Topografia
+
+```{r}
+#| label: fig-localizacao
+#| fig-cap: "Distribuição anatômica das lesões"
+
+# Agrupa localizações
+lesoes_local <- lesoes |>
+  mutate(
+    local_grupo = case_when(
+      localizacao %in% c("face", "orelha") ~ "Face/Orelha",
+      localizacao == "couro cabeludo" ~ "Couro cabeludo",
+      localizacao %in% c("tórax", "dorso") ~ "Tronco",
+      localizacao == "cervical" ~ "Cervical",
+      str_detect(localizacao, "membro superior|antebraço") ~ "Membro superior",
+      str_detect(localizacao, "membro inferior|pé") ~ "Membro inferior",
+      TRUE ~ "Outro"
+    )
+  )
+
+lesoes_local |>
+  filter(!is.na(local_grupo)) |>
+  count(local_grupo, histo_tipo) |>
+  mutate(
+    histo_tipo = toupper(histo_tipo),
+    local_grupo = fct_reorder(local_grupo, n, .fun = sum)
+  ) |>
+  ggplot(aes(x = local_grupo, y = n, fill = histo_tipo)) +
+  geom_col(width = 0.7) +
+  geom_text(
+    aes(label = n),
+    position = position_stack(vjust = 0.5),
+    color = "white", fontface = "bold", size = 3.5
+  ) +
+  coord_flip() +
+  scale_fill_manual(values = cores[c("cbc", "cec")]) +
+  labs(
+    x = NULL,
+    y = "Número de lesões",
+    fill = "Tipo",
+    title = "Localização anatômica",
+    subtitle = "Estratificado por tipo histológico"
+  )
+```
+
+## Conduta Cirúrgica
+
+```{r}
+#| label: tbl-fechamento
+#| tbl-cap: "Técnicas de fechamento utilizadas"
+
+lesoes |>
+  filter(!is.na(fech)) |>
+  mutate(
+    fech_label = case_when(
+      fech == "direto" ~ "Fechamento direto",
+      fech == "retalho" ~ "Retalho",
+      fech == "enxerto" ~ "Enxerto",
+      fech == "2intencao" ~ "Segunda intenção",
+      TRUE ~ fech
+    ),
+    tipo = toupper(histo_tipo)
+  ) |>
+  select(fech_label, tipo) |>
+  tbl_summary(
+    by = tipo,
+    label = list(fech_label ~ "Técnica de fechamento"),
+    statistic = all_categorical() ~ "{n} ({p}%)"
+  ) |>
+  add_overall(last = TRUE) |>
+  bold_labels() |>
+  as_gt() |>
+  tab_header(
+    title = "Técnicas de fechamento",
+    subtitle = "Por tipo histológico"
+  )
+```
+
+## Desfechos Imediatos
+
+### Margens Cirúrgicas
+
+```{r}
+#| label: fig-margens
+#| fig-cap: "Status das margens cirúrgicas"
+
+lesoes |>
+  filter(!is.na(margens_ap)) |>
+  mutate(
+    margens_status = case_when(
+      str_detect(margens_ap, "comprometida") ~ "Comprometidas",
+      margens_ap == "livres" ~ "Livres",
+      TRUE ~ "Outro"
+    )
+  ) |>
+  count(margens_status) |>
+  mutate(
+    pct = n / sum(n) * 100,
+    margens_status = fct_reorder(margens_status, n, .desc = TRUE)
+  ) |>
+  ggplot(aes(x = margens_status, y = n, fill = margens_status)) +
+  geom_col(width = 0.5) +
+  geom_text(
+    aes(label = sprintf("%d (%.1f%%)", n, pct)),
+    vjust = -0.3, size = 4
+  ) +
+  scale_fill_manual(
+    values = c("Livres" = "#2A9D8F", "Comprometidas" = "#E63946", "Outro" = "gray60"),
+    guide = "none"
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    x = NULL,
+    y = "Número de lesões",
+    title = "Status das margens",
+    subtitle = "Resultado anatomopatológico"
+  )
+```
+
+### Complicações e Reintervenções
+
+```{r}
+#| label: tbl-desfechos
+#| tbl-cap: "Desfechos cirúrgicos adversos"
+
+lesoes |>
+  mutate(
+    teve_complicacao = !is.na(complicacao) & complicacao != "",
+    teve_reintervencao = reintervencao == TRUE
+  ) |>
+  select(teve_complicacao, teve_reintervencao) |>
+  tbl_summary(
+    label = list(
+      teve_complicacao ~ "Complicação pós-operatória",
+      teve_reintervencao ~ "Reintervenção cirúrgica"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)"
+  ) |>
+  bold_labels() |>
+  as_gt() |>
+  tab_header(
+    title = "Desfechos adversos",
+    subtitle = paste0("N = ", nrow(lesoes), " lesões")
+  )
+```
+
+```{r}
+#| label: fig-complicacoes
+#| fig-cap: "Tipos de complicações observadas"
+
+complicacoes <- lesoes |>
+  filter(!is.na(complicacao), complicacao != "") |>
+  separate_rows(complicacao, sep = ",\\s*") |>
+  count(complicacao) |>
+  filter(n > 0)
+
+if (nrow(complicacoes) > 0) {
+  complicacoes |>
+    mutate(complicacao = fct_reorder(complicacao, n)) |>
+    ggplot(aes(x = complicacao, y = n)) +
+    geom_col(fill = "#E63946", width = 0.6) +
+    geom_text(aes(label = n), hjust = -0.3, size = 4) +
+    coord_flip() +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+    labs(
+      x = NULL,
+      y = "Número de casos",
+      title = "Tipos de complicações",
+      subtitle = "Eventos adversos pós-operatórios"
+    )
+} else {
+  cat("Nenhuma complicação registrada nos dados.")
+}
+```
+
+------------------------------------------------------------------------
+
+# Verificações de Consistência
+
+## Combinações Esperadas por Tipo
+
+Verificação de atributos específicos por tipo histológico:
+
+```{r}
+#| label: tbl-consistencia
+#| tbl-cap: "Verificação de atributos por tipo histológico"
+
+# CBC com subtipo (esperado) vs CEC com subtipo (inesperado)
+consist <- lesoes |>
+  mutate(
+    tem_subtipo = !is.na(histo_subtipo) & histo_subtipo != "",
+    tem_difer = !is.na(histo_difer) & histo_difer != "",
+    tem_comport = !is.na(comport) & comport != ""
+  ) |>
+  group_by(histo_tipo) |>
+  summarise(
+    n = n(),
+    `Com subtipo` = sum(tem_subtipo),
+    `Com diferenciação` = sum(tem_difer),
+    `Com comportamento` = sum(tem_comport),
+    .groups = "drop"
+  ) |>
+  mutate(histo_tipo = toupper(histo_tipo))
+
+consist |>
+  gt() |>
+  tab_header(
+    title = "Atributos preenchidos por tipo",
+    subtitle = "Verificação de consistência clínica"
+  ) |>
+  cols_label(histo_tipo = "Tipo") |>
+  tab_footnote(
+    footnote = "CBC deve ter subtipo; CEC deve ter diferenciação e comportamento.",
+    locations = cells_column_labels(columns = everything())
+  )
+```
+
+::: callout-tip
+## Regra clínica
+
+-   **CBC:** espera-se subtipo histológico (nodular, infiltrativo, etc.)
+-   **CEC:** espera-se grau de diferenciação e comportamento (in situ/invasivo)
+:::
+
+------------------------------------------------------------------------
+
+# Síntese e Questões Emergentes
+
+## Resumo dos Achados
+
+```{r}
+#| label: resumo-final
+
+n_pac <- nrow(pacientes)
+n_les <- nrow(lesoes)
+idade_med <- median(pacientes$idade)
+pct_fem <- mean(pacientes$sexo == "f", na.rm = TRUE) * 100
+pct_cbc <- mean(lesoes$histo_tipo == "cbc", na.rm = TRUE) * 100
+pct_cec <- mean(lesoes$histo_tipo == "cec", na.rm = TRUE) * 100
+pct_complic <- mean(!is.na(lesoes$complicacao) & lesoes$complicacao != "", na.rm = TRUE) * 100
+```
+
+| Indicador            | Valor                             |
+|----------------------|-----------------------------------|
+| Pacientes avaliados  | `r n_pac`                         |
+| Lesões operadas      | `r n_les`                         |
+| Idade mediana        | `r idade_med` anos                |
+| Sexo feminino        | `r sprintf("%.1f", pct_fem)`%     |
+| Proporção CBC        | `r sprintf("%.1f", pct_cbc)`%     |
+| Proporção CEC        | `r sprintf("%.1f", pct_cec)`%     |
+| Taxa de complicações | `r sprintf("%.1f", pct_complic)`% |
+
+## Questões para Análise Inferencial
+
+Com base na análise exploratória, emergem as seguintes perguntas:
+
+1.  **Fatores associados a complicações:** idade, comorbidades, técnica de fechamento e tipo histológico influenciam a taxa de complicações?
+
+2.  **Preditores de margens comprometidas:** existem características tumorais ou cirúrgicas associadas a margens positivas?
+
+3.  **Perfil do CEC agressivo:** pacientes com CEC invasivo pouco diferenciado diferem clinicamente dos demais?
+
+4.  **Impacto da técnica de fechamento:** retalhos e enxertos apresentam mais complicações que fechamento direto nesta população?
+
+## Próximos Passos
+
+-   [ ] Definir variáveis de ajuste para análise multivariada
+-   [ ] Considerar modelos para dados correlacionados (múltiplas lesões/paciente)
+-   [ ] Avaliar necessidade de estratificação por tipo histológico
+
+------------------------------------------------------------------------
+
+::: callout-important
+## Nota metodológica {.column-margin}
+
+Esta análise é **estritamente descritiva**. Nenhuma inferência causal deve ser extraída dos dados apresentados. As questões emergentes servem como hipóteses para etapas analíticas subsequentes.
+:::
+
+------------------------------------------------------------------------
+
+*Feito com amor por [Wilho Engroff Schio](https://www.facebook.com/wiliam.schio.scherer/) usando R - v`r format(Sys.time(), "%d%m%Y")`.*

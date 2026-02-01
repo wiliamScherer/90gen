@@ -1,0 +1,17 @@
+format:
+  html:
+    theme: cosmo
+    toc: false
+    toc-depth: 3
+    toc-location: left
+    toc-title: "Navegação"
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver código"
+    fig-width: 8
+    fig-height: 5
+    fig-dpi: 150
+
+  docx:
+    toc: false
+    number-sections: true

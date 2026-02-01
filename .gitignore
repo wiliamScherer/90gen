@@ -1,0 +1,65 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# -----------------------------
+# R / RStudio
+# -----------------------------
+.Rhistory
+.RData
+.Rproj.user/
+
+# -----------------------------
+# renv (commita o renv/ "infra", mas não a library)
+# -----------------------------
+renv/library/
+renv/staging/
+renv/python/
+
+# -----------------------------
+# Quarto / HTML render / caches
+# -----------------------------
+.quarto/
+.quarto-cache/
+*_cache/
+*_files/
+
+# Se quiser: não versionar HTMLs gerados (opcional)
+# docs/*.html
+# relatorio/*.html
+
+# -----------------------------
+# Outputs e artefatos gerados
+# -----------------------------
+output/
+*.log
+
+# -----------------------------
+# Dados (por segurança)
+# Ajusta conforme tua política
+# -----------------------------
+backup/
+data/clean/rds/
+data/derived/
+data/raw/90arios.csv
+data/raw/dados_primarios.tsv
+
+# Arquivos soltos possivelmente sensíveis
+pacientes.tsv
+lesoes.tsv
+catastrofe.tsv
+
+# -----------------------------
+# Binários
+# -----------------------------
+*.rds
+*.docx
+
+# -----------------------------
+# macOS
+# -----------------------------
+.DS_Store
+Icon?
+
+data/raw/

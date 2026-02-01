@@ -1,0 +1,11 @@
+:root{
+  --azul_900: #062860;
+  --azul_800: #083C91;
+  --azul_700: #0B50C1;
+  --azul_500: #4285F4;
+  --azul_200: #9FC1F9;
+}
+
+a { color: var(--azul_700); }
+a:hover { color: var(--azul_900); }
+

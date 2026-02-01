@@ -1,0 +1,1056 @@
+---
+title: "Cirurgias Dermatológicas em Nonagenários"
+subtitle: '"Nonagenários" me lembra "nona", que me lembra "picão da nona" 💖'
+author: "Jinfy Maria dos Santos Goedert"
+date: today
+date-format: "DD.MM.YYYY"
+lang: pt-BR
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-title: "Navegação"
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver código"
+    fig-width: 8
+    fig-height: 5
+    fig-dpi: 150
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: false
+  cache: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+# Dependências
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+library(gtsummary)
+library(gt)
+library(scales)
+library(purrr)
+library(tibble)
+library(htmltools)
+library(flextable)
+library(broom)
+
+# ---- Raiz do projeto (renv_root) ----
+find_project_root <- function(start = getwd(), marker = "90gen.Rproj", max_up = 15) {
+  p <- normalizePath(start, winslash = "/", mustWork = FALSE)
+  for (i in 0:max_up) {
+    if (file.exists(file.path(p, marker))) return(p)
+    up <- normalizePath(file.path(p, ".."), winslash = "/", mustWork = FALSE)
+    if (identical(up, p)) break
+    p <- up
+  }
+  normalizePath(start, winslash = "/", mustWork = FALSE)
+}
+
+proj <- Sys.getenv("QUARTO_PROJECT_DIR", unset = getwd())
+renv_root <- find_project_root(proj)
+
+if (!file.exists(file.path(renv_root, "90gen.Rproj"))) {
+  stop("Não encontrei a raiz do projeto (90gen.Rproj) subindo a partir de: ", proj)
+}
+
+# Dados
+pacientes_path <- file.path(renv_root, "data", "derived", "pacientes.rds")
+lesoes_path    <- file.path(renv_root, "data", "derived", "lesoes.rds")
+
+stopifnot(file.exists(pacientes_path), file.exists(lesoes_path))
+
+pacientes <- readRDS(pacientes_path)
+lesoes    <- readRDS(lesoes_path)
+
+# Tema global para gráficos
+theme_set(
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 14),
+      plot.subtitle = element_text(color = "gray20"),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+)
+
+# Função para formatar n (percentual)
+fmt_npct <- function(k, n) sprintf("%d (%.1f%%)", k, 100 * k / n)
+
+azulClaro = "#4285F4"
+azulEscuro = "#2C5BA9"
+
+# Paleta de cores
+cores <- c(
+  cbc  = azulClaro,
+  fem  = azulClaro,
+  sim  = azulClaro,
+  cec  = azulEscuro,
+  masc = azulEscuro,
+  nao  = azulEscuro
+)
+
+# Preparar dados analíticos (usado em várias seções)
+lesoes_analise <- lesoes |>
+  mutate(
+    # Desfechos binários
+    teve_complicacao = !is.na(complicacao) & str_squish(as.character(complicacao)) != "",
+    teve_reintervencao = as.logical(reintervencao) %in% TRUE,
+    margem_comprometida = case_when(
+      is.na(margens_ap) ~ NA,
+      str_detect(margens_ap, "comprometid") ~ TRUE,
+      margens_ap == "livres" ~ FALSE,
+      TRUE ~ NA
+    ),
+    
+    # Fechamento categorizado
+    fech_label = case_when(
+      fech == "direto" ~ "Fechamento direto",
+      fech == "retalho" ~ "Retalho",
+      fech == "enxerto" ~ "Enxerto",
+      fech == "2intencao" ~ "Segunda intenção",
+      TRUE ~ as.character(fech)
+    ),
+    
+    # Localização agrupada
+    local_grupo = case_when(
+      localizacao == "face" ~ "Face",
+      localizacao == "orelha" ~ "Orelha",
+      localizacao == "couro cabeludo" ~ "Couro cabeludo",
+      localizacao %in% c("tórax", "dorso") ~ "Tronco",
+      localizacao == "cervical" ~ "Cervical",
+      str_detect(localizacao, "membro superior|antebraço") ~ "Membro superior",
+      str_detect(localizacao, "membro inferior|pé") ~ "Membro inferior",
+      TRUE ~ "Outro"
+    ),
+    
+    # Subtipo agressivo (CBC)
+    subtipo_agressivo = case_when(
+      histo_tipo != "cbc" ~ NA,
+      str_detect(histo_subtipo, "infiltrativo|escleroderm|micronodular") ~ TRUE,
+      TRUE ~ FALSE
+    ),
+    
+    # Tipo histológico padronizado
+    tipo_label = toupper(histo_tipo)
+  )
+
+# Juntar dados do paciente às lesões
+comorb_cols <- c("has", "dm", "dlp", "ic", "fa", "drc", "alzheimer", "parkinson", "dpoc")
+comorb_cols <- intersect(comorb_cols, names(pacientes))
+
+pacientes_compl <- pacientes |>
+  mutate(
+    n_comorb = rowSums(across(all_of(comorb_cols), ~ as.integer(.x %in% TRUE)), na.rm = TRUE),
+    faixa_comorb = cut(n_comorb, breaks = c(-1, 0, 2, Inf), labels = c("0", "1-2", "3+"))
+  )
+
+lesoes_full <- lesoes_analise |>
+  left_join(
+    pacientes_compl |> select(paciente, idade, sexo, fototipo, n_comorb, faixa_comorb),
+    by = "paciente"
+  )
+```
+
+```{r}
+# Função auxiliar para tradução de partes em inglês das tabelas
+
+ptbr <- function(x,
+                 local = c("geral", "header", "footnote", "source_note", "title", "subtitle"
+                 ),
+                 dict_extra = NULL,
+                 warn_untranslated = FALSE) {
+  local <- match.arg(local)
+  if (!is.character(x)) x <- as.character(x)
+
+  # Dicionário "por contexto" (você pode ir crescendo isso aos poucos)
+  dict <- list(
+    geral = c(
+      "p-value" = "p-valor",
+      "95% CI" = "IC 95%",
+      "Characteristic" = "Característica",
+      "Overall" = "Total",
+      "Abbreviations" = "Abreviações",
+      "Fisher's exact test" = "Teste exato de Fisher",
+
+      # frases inteiras comuns (mais seguro do que trocar "CI" solto)
+      "CI = Confidence Interval, OR = Odds Ratio" = "IC = Intervalo de confiança, OR = Razão de chances"
+    ),
+    header = c(
+      "p-value" = "p-valor",
+      "95% CI" = "IC 95%",
+      "Characteristic" = "Característica",
+      "Overall" = "Total",
+      "Abbreviations" = "Abreviações"
+    ),
+    footnote = c(
+      "Fisher's exact test" = "Teste exato de Fisher",
+      "CI = Confidence Interval, OR = Odds Ratio" = "IC = Intervalo de confiança, OR = Razão de chances"
+    ),
+    source_note = c(
+      "Abbreviations" = "Abreviações",
+      "CI = Confidence Interval, OR = Odds Ratio" = "IC = Intervalo de confiança, OR = Razão de chances"
+    ),
+    title = c(),
+    subtitle = c()
+  )
+
+  # Junta: geral + local + extras do usuário
+  map <- c(dict$geral, dict[[local]])
+  if (!is.null(dict_extra)) map <- c(map, dict_extra)
+
+  # Função de tradução para um elemento
+  translate_one <- function(s) {
+    # 1) se casar exato com alguma chave, troca direto
+    if (s %in% names(map)) return(unname(map[s]))
+
+    # 2) senão, aplica substituições "fixas" (sem regex) em cascata
+    # ordena por tamanho pra não trocar pedaços antes da hora
+    keys <- names(map)[order(nchar(names(map)), decreasing = TRUE)]
+    out <- s
+    for (k in keys) {
+      out <- gsub(k, map[[k]], out, fixed = TRUE)
+    }
+    out
+  }
+
+  out <- vapply(x, translate_one, FUN.VALUE = character(1))
+
+  if (warn_untranslated) {
+    unchanged <- x == out
+    if (any(unchanged)) {
+      warning("ptbr(): sem tradução para: ", paste(unique(x[unchanged]), collapse = ", "))
+    }
+  }
+
+  out
+}
+```
+
+# Disclaimer
+
+Hello didi, esse documento é uma versão turbinada da análise dos teus dados. Organizei tudo de um jeito que dá pra ver o que está acontecendo, entender os padrões, e — o mais importante — **testar se as diferenças que a gente enxerga são reais ou só obra do acaso**.
+
+**O que temos em mãos:**
+
+-   **`r nrow(pacientes)` pacientes** no total
+-   **`r nrow(lesoes)` lesões** operadas no total
+
+**O plano de voo:**
+
+1.  **Descritiva** — Quem são os pacientes? Como são as lesões?
+2.  **Bivariada** — O que se associa com complicação? Com margem comprometida?
+3.  **Multivariada** — Quando ajustamos por outras variáveis, o efeito persiste?
+4.  **Quem voltou?** — Os 17 pacientes com 2 visitas são diferentes?
+
+Bora?
+
+------------------------------------------------------------------------
+
+# Parte I: Descritiva {#sec-descritiva}
+
+## Quem são esses velhos?
+
+### O básico: idade, sexo, fototipo
+
+```{r}
+#| label: tbl-demografica
+#| tbl-cap: "Características dos pacientes"
+
+df_tab <- pacientes |>
+  mutate(
+    sexo_label = factor(sexo, c("f", "m"), c("Feminino", "Masculino")),
+    fototipo = factor(fototipo)
+  )
+
+tbl_idade_gts <- df_tab |>
+  select(idade) |>
+  tbl_summary(
+    label = list(idade ~ "Idade (anos)"),
+    statistic = list(all_continuous() ~ "{median} ({p25}–{p75})"),
+    digits = list(all_continuous() ~ 1),
+    missing = "no"
+  )
+
+tbl_outros_gts <- df_tab |>
+  select(sexo_label, fototipo, cbc_cec_previo, mohs, mais_cx, obito) |>
+  tbl_summary(
+    label = list(
+      sexo_label ~ "Sexo",
+      fototipo ~ "Fototipo (Fitzpatrick)",
+      cbc_cec_previo ~ "Já teve CBC/CEC antes",
+      mohs ~ "Fez Mohs",
+      mais_cx ~ "Teve outras cirurgias",
+      obito ~ "Faleceu no seguimento"
+    ),
+    statistic = list(all_categorical() ~ "{n} ({p}%)"),
+    digits = list(all_categorical() ~ c(0, 1)),
+    missing = "no"
+  )
+
+tbl_idade_gt <- tbl_idade_gts |> bold_labels() |> as_gt()
+tbl_outros_gt <- tbl_outros_gts |> bold_labels() |> as_gt()
+
+if (knitr::is_html_output()) {
+  htmltools::div(
+    style = "display:flex; gap:18px; align-items:flex-start;",
+    htmltools::div(style = "flex: 0 0 32%;", htmltools::HTML(gt::as_raw_html(tbl_idade_gt))),
+    htmltools::div(style = "flex: 1 1 68%;", htmltools::HTML(gt::as_raw_html(tbl_outros_gt)))
+  )
+} else {
+  tbl_idade_gts |> bold_labels() |> as_flex_table()
+  tbl_outros_gts |> bold_labels() |> as_flex_table()
+}
+```
+
+```{r}
+#| label: fig-idade
+#| fig-cap: "Distribuição de idade"
+
+pacientes |>
+  ggplot(aes(x = idade)) +
+  geom_histogram(binwidth = 1, fill = cores["cbc"], color = "white", alpha = 0.8) +
+  geom_vline(xintercept = median(pacientes$idade), linetype = "dashed", color = "gray30", linewidth = 0.8) +
+  annotate("text", x = median(pacientes$idade) + 0.5, y = Inf, vjust = 2, hjust = 0,
+           label = paste0("Mediana: ", median(pacientes$idade), " anos"), size = 3.5, color = "gray30") +
+  scale_x_continuous(breaks = seq(90, 110, 2)) +
+  labs(x = "Idade (anos)", y = "Número de pacientes",
+       title = "A idade dos teus pacientes", subtitle = "Todo mundo tem 90+, mas olha a variação!")
+```
+
+Mediana de `r median(pacientes$idade)` anos. Metade dos pacientes tem **mais** que isso. É gente bem idosa mesmo.
+
+### E as comorbidades?
+
+```{r}
+#| label: fig-comorbidades
+#| fig-cap: "As comorbidades mais comuns"
+
+comorb_labels <- c(
+  has = "Hipertensão", dm = "Diabetes", dlp = "Dislipidemia",
+  ic = "Insuf. cardíaca", fa = "Fibrilação atrial", drc = "Doença renal crônica",
+  alzheimer = "Alzheimer", parkinson = "Parkinson", dpoc = "DPOC"
+)
+
+comorb_prev <- pacientes |>
+  summarise(across(all_of(comorb_cols), ~ sum(.x, na.rm = TRUE))) |>
+  pivot_longer(everything(), names_to = "comorbidade", values_to = "n") |>
+  mutate(pct = n / nrow(pacientes) * 100, label = comorb_labels[comorbidade], label = fct_reorder(label, pct))
+
+comorb_prev |>
+  ggplot(aes(x = label, y = pct)) +
+  geom_col(fill = cores["cbc"], width = 0.7) +
+  geom_text(aes(label = sprintf("%.0f%%", pct)), hjust = -0.2, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(limits = c(0, 100), labels = \(x) paste0(x, "%")) +
+  labs(x = NULL, y = "Prevalência", title = "O que eles têm além do câncer de pele",
+       subtitle = "Spoiler: hipertensão lidera disparado")
+```
+
+**Hipertensão** em `r round(comorb_prev$pct[comorb_prev$comorbidade == "has"])`% das vovozinhas. Nenhuma surpresa, né?
+
+------------------------------------------------------------------------
+
+## As lesões
+
+### CBC ou CEC?
+
+```{r}
+#| label: fig-tipo-histo
+#| fig-cap: "Distribuição por tipo histológico"
+
+lesoes |>
+  filter(!is.na(histo_tipo)) |>
+  count(histo_tipo) |>
+  mutate(pct = n / sum(n), label_pct = scales::percent(pct, accuracy = 0.1),
+         label = toupper(histo_tipo), label = fct_reorder(label, n, .desc = TRUE)) |>
+  ggplot(aes(x = label, y = n, fill = histo_tipo)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = label_pct), position = position_stack(vjust = 0.5), color = "white", fontface = "bold", size = 4) +
+  geom_text(aes(label = n), vjust = -0.4, color = "gray20", fontface = "bold", size = 4) +
+  scale_fill_manual(values = cores[c("cbc", "cec")], guide = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = NULL, y = "Número de lesões", title = "CBC domina, chocando um total de zero pessoas",
+       subtitle = paste0("Total: ", nrow(lesoes), " lesões"))
+```
+
+```{r}
+#| label: calc-tipos
+pct_cbc <- mean(lesoes$histo_tipo == "cbc", na.rm = TRUE) * 100
+pct_cec <- mean(lesoes$histo_tipo == "cec", na.rm = TRUE) * 100
+```
+
+CBC representa `r sprintf("%.0f", pct_cbc)`% das lesões. Mas os `r sprintf("%.0f", pct_cec)`% de CEC são mais preocupantes em termos de agressividade.
+
+### Desfechos: o resumo rápido
+
+```{r}
+#| label: tbl-desfechos-resumo
+
+n_compl <- sum(lesoes_analise$teve_complicacao, na.rm = TRUE)
+n_marg <- sum(lesoes_analise$margem_comprometida, na.rm = TRUE)
+n_reint <- sum(lesoes_analise$teve_reintervencao, na.rm = TRUE)
+
+tibble(
+  Desfecho = c("Complicação", "Margem comprometida", "Reintervenção"),
+  n = c(n_compl, n_marg, n_reint),
+  `%` = sprintf("%.1f%%", 100 * c(n_compl, n_marg, n_reint) / nrow(lesoes))
+) |>
+  gt() |>
+  tab_header(title = "Resumo dos desfechos", subtitle = paste0("N = ", nrow(lesoes), " lesões"))
+```
+
+Poucos eventos, mas o suficiente pra gente investigar!
+
+------------------------------------------------------------------------
+
+# Parte II: Análise Bivariada {#sec-bivariada}
+
+Agora a gente sai da contagem e entra na **associação**. A pergunta é: *"quem complica mais?"*
+
+::: callout-note
+## Por que vamos usar o Teste Exato de Fisher (e não Qui-quadrado)?
+
+Com poucos eventos (13 complicações, 7 margens comprometidas), o teste de Fisher é mais confiável. Ele calcula a probabilidade exata, sem depender de aproximações que funcionam mal com N pequeno.
+:::
+
+## Fatores associados a COMPLICAÇÃO
+
+```{r}
+#| label: tbl-bivariada-complicacao
+#| tbl-cap: "Análise bivariada: fatores associados a complicação"
+
+lesoes_biv <- lesoes_full |>
+  filter(!is.na(teve_complicacao)) |>
+  mutate(
+    # Rótulo robusto (funciona se veio logical, 0/1, "TRUE"/"FALSE", etc.)
+    teve_complicacao_label = case_when(
+      tolower(as.character(teve_complicacao)) %in% c("true", "t", "1", "sim") ~ "Sim",
+      TRUE ~ "Não"
+    ) |> factor(levels = c("Não", "Sim")),
+
+    sexo_label = factor(sexo, c("f", "m"), c("Feminino", "Masculino")),
+    tipo_label = factor(tipo_label, c("CBC", "CEC")),
+    fech_simples = case_when(
+      fech_label == "Fechamento direto" ~ "Direto/2ª intenção",
+      fech_label == "Segunda intenção" ~ "Direto/2ª intenção",
+      TRUE ~ "Retalho/Enxerto"
+    ) |> factor(levels = c("Direto/2ª intenção", "Retalho/Enxerto")),
+    idade_cat = cut(idade, breaks = c(89, 92, 95, Inf), labels = c("90-92", "93-95", "96+"))
+  )
+
+tbl_biv_compl <- lesoes_biv |>
+  select(
+    teve_complicacao_label,
+    sexo_label, idade_cat, faixa_comorb, tipo_label, fech_simples, local_grupo
+  ) |>
+  tbl_summary(
+    by = teve_complicacao_label,
+    label = list(
+      sexo_label ~ "Sexo",
+      idade_cat ~ "Faixa etária",
+      faixa_comorb ~ "Nº comorbidades",
+      tipo_label ~ "Tipo histológico",
+      fech_simples ~ "Técnica de fechamento",
+      local_grupo ~ "Localização"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    digits = all_categorical() ~ c(0, 1),
+    missing = "no"
+  ) |>
+  add_p(test = all_categorical() ~ "fisher.test") |>
+  add_overall() |>
+  modify_header(
+    label ~ "**Característica**",
+    stat_0 ~ "**Total**",
+    stat_1 ~ "**Não**",
+    stat_2 ~ "**Sim**",
+    p.value ~ "**p-valor**"
+  ) |>
+  modify_footnote(
+    p.value ~ "Teste exato de Fisher"
+  ) |>
+  bold_p(t = 0.05) |>
+  bold_labels()
+
+tbl_biv_compl |>
+  as_gt() |>
+  tab_header(
+    title = "Quem complica mais?",
+    subtitle = "Análise bivariada com teste exato de Fisher"
+  )
+```
+
+```{r}
+#| label: calc-or-fech
+
+# OR bruto: fechamento complexo vs simples
+tab_fech <- table(lesoes_biv$fech_simples, lesoes_biv$teve_complicacao)
+or_fech <- fisher.test(tab_fech)
+```
+
+::: callout-important
+## Repara:
+
+**Técnica de fechamento** parece fazer diferença. Retalho e enxerto têm mais complicação que fechamento direto/2ª intenção.
+
+-   OR bruto: **`r sprintf("%.1f", or_fech$estimate)`** (IC95%: `r sprintf("%.1f–%.1f", or_fech$conf.int[1], or_fech$conf.int[2])`)
+-   p = **`r sprintf("%.3f", or_fech$p.value)`** (!!!)
+
+Mas calma — isso pode ser confusão. Lesões que precisam de retalho/enxerto provavelmente são maiores, em locais mais difíceis... A gente precisa ajustar.
+:::
+
+## Fatores associados a MARGEM COMPROMETIDA
+
+```{r}
+#| label: tbl-bivariada-margem
+#| tbl-cap: "Análise bivariada: fatores associados a margem comprometida"
+
+lesoes_biv_marg <- lesoes_full |>
+  filter(!is.na(margem_comprometida)) |>
+  mutate(
+    margem_comprometida_label = case_when(
+      tolower(as.character(margem_comprometida)) %in% c("true", "t", "1", "sim") ~ "Sim",
+      TRUE ~ "Não"
+    ) |> factor(levels = c("Não", "Sim")),
+
+    tipo_label = factor(tipo_label, c("CBC", "CEC")),
+    fech_simples = case_when(
+      fech_label == "Fechamento direto" ~ "Direto/2ª intenção",
+      fech_label == "Segunda intenção" ~ "Direto/2ª intenção",
+      TRUE ~ "Retalho/Enxerto"
+    ) |> factor(levels = c("Direto/2ª intenção", "Retalho/Enxerto"))
+  )
+
+# Subtipos agressivos de CBC
+lesoes_cbc_marg <- lesoes_biv_marg |>
+  filter(histo_tipo == "cbc", !is.na(subtipo_agressivo))
+
+tbl_biv_marg <- lesoes_biv_marg |>
+  select(margem_comprometida_label, tipo_label, fech_simples, local_grupo) |>
+  tbl_summary(
+    by = margem_comprometida_label,
+    label = list(
+      tipo_label ~ "Tipo histológico",
+      fech_simples ~ "Técnica de fechamento",
+      local_grupo ~ "Localização"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    digits = all_categorical() ~ c(0, 1),
+    missing = "no"
+  ) |>
+  add_p(test = all_categorical() ~ "fisher.test") |>
+  add_overall() |>
+  modify_header(
+    label ~ "**Característica**",
+    stat_0 ~ "**Total**",
+    stat_1 ~ "**Não**",
+    stat_2 ~ "**Sim**",
+    p.value ~ "**p-valor**"
+  ) |>
+  modify_footnote(
+    p.value ~ "Teste exato de Fisher"
+  ) |>
+  bold_p(t = 0.05) |>
+  bold_labels()
+
+tbl_biv_marg |>
+  as_gt() |>
+  tab_header(
+    title = "Quem tem mais margem comprometida?",
+    subtitle = "Análise bivariada com teste exato de Fisher"
+  )
+```
+
+```{r}
+#| label: tbl-subtipo-agressivo
+#| tbl-cap: "CBC: subtipos agressivos vs indolentes"
+
+if (nrow(lesoes_cbc_marg) > 0 && sum(!is.na(lesoes_cbc_marg$subtipo_agressivo)) > 5) {
+
+  tbl_sub <- lesoes_cbc_marg |>
+    mutate(
+      margem_label = case_when(
+        tolower(as.character(margem_comprometida)) %in% c("true", "t", "1", "sim") ~ "Margem comprometida",
+        TRUE ~ "Margem livre"
+      ) |> factor(levels = c("Margem livre", "Margem comprometida")),
+
+      subtipo_cat = case_when(
+        subtipo_agressivo ~ "Agressivo (infiltrativo, esclerod., micronod.)",
+        TRUE ~ "Indolente (nodular, superficial, outros)"
+      ) |> factor(levels = c(
+        "Indolente (nodular, superficial, outros)",
+        "Agressivo (infiltrativo, esclerod., micronod.)"
+      ))
+    ) |>
+    select(margem_label, subtipo_cat) |>
+    tbl_summary(
+      by = margem_label,
+      label = list(subtipo_cat ~ "Subtipo de CBC"),
+      statistic = all_categorical() ~ "{n} ({p}%)",
+      missing = "no"
+    ) |>
+    add_p(test = all_categorical() ~ "fisher.test")
+
+  # PATCH (fora do pipe principal)
+  tbl_sub <- tbl_sub |>
+    modify_header(
+      label ~ "**Característica**",
+      p.value ~ "**p-valor**"
+    ) |>
+    modify_footnote(p.value ~ "Teste exato de Fisher")
+
+  if ("stat_0" %in% names(tbl_sub$table_body)) {
+    tbl_sub <- tbl_sub |>
+      modify_header(stat_0 ~ "**Total**")
+  }
+
+  tbl_sub <- tbl_sub |>
+    bold_p(t = 0.05) |>
+    bold_labels()
+
+  tbl_sub |>
+    as_gt() |>
+    tab_header(
+      title = "Subtipos agressivos têm mais margem comprometida?",
+      subtitle = "Só CBCs"
+    )
+}
+```
+
+Os números são pequenos, mas já dá pra ter uma noção. Guarda essas informações — elas vão voltar na discussão.
+
+------------------------------------------------------------------------
+
+# Análise Multivariada {#sec-multivariada}
+
+## *(Porque sonhar não custa nada)*
+
+Aqui é onde a magia acontece, tipo Beto Carreiro. A gente ajusta uma variável pela outra pra ver se o efeito **persiste** ou se era só confusão.
+
+::: callout-warning
+## Limitação importante
+
+Com apenas `r n_compl` complicações, não dá pra colocar muitas variáveis no modelo. A regra que eu inventei é de \~10 eventos por variável. Então vou ser conservador: **modelo com 1 variável, 2 no máximo**.
+:::
+
+## Modelo: Complicação \~ Técnica de fechamento + Tipo histológico
+
+```{r}
+#| label: modelo-complicacao
+
+lesoes_modelo <- lesoes_biv |>
+  filter(!is.na(fech_simples), !is.na(tipo_label))
+
+if (n_compl >= 8) {
+  mod_compl <- glm(
+    teve_complicacao ~ fech_simples + tipo_label,
+    data = lesoes_modelo,
+    family = binomial(link = "logit")
+  )
+
+  tbl_mod <- mod_compl |>
+    gtsummary::tbl_regression(
+      exponentiate = TRUE,
+      label = list(
+        fech_simples ~ "Técnica de fechamento",
+        tipo_label ~ "Tipo histológico"
+      )
+    ) |>
+    # IC em 1 coluna: junta conf.low + conf.high e esconde conf.high
+    gtsummary::modify_column_merge(
+      pattern = "{conf.low}, {conf.high}",
+      rows = !is.na(.data$estimate)
+    ) |>
+    gtsummary::modify_column_hide(columns = "conf.high") |>
+    # Cabeçalhos em PT-BR + IC com nota
+    gtsummary::modify_header(
+      label ~ "**Característica**",
+      p.value ~ "**p-valor**",
+      conf.low ~ "**IC 95%**"
+    ) |>
+    # Rodapé explicando o “¹”
+    gtsummary::modify_footnote(
+      conf.low ~ "IC 95% (inferior, superior)"
+    ) |>
+    # Remove a nota automática “Abbreviations: …” (em inglês)…
+    gtsummary::remove_abbreviation() |>
+    # …e coloca uma em PT-BR do teu jeito
+    gtsummary::modify_source_note(
+      "Abreviações: IC = Intervalo de confiança; OR = Razão de chances"
+    ) |>
+    gtsummary::bold_p(t = 0.05) |>
+    gtsummary::bold_labels()
+
+  tbl_mod |>
+    as_gt() |>
+    gt::tab_header(
+      title = "Modelo multivariado: fatores associados a complicação",
+      subtitle = "Regressão logística — OR ajustado (IC 95%)"
+    )
+} else {
+  cat("N de eventos muito pequeno para modelo multivariado confiável.")
+}
+```
+
+```{r}
+#| label: interpretacao-modelo
+#| results: asis
+
+if (exists("mod_compl")) {
+  coefs <- tidy(mod_compl, exponentiate = TRUE, conf.int = TRUE)
+  or_fech_aj <- coefs |> filter(str_detect(term, "fech_simples"))
+  
+  if (nrow(or_fech_aj) > 0) {
+    cat(sprintf(
+      "\n**Interpretação:** Após ajustar por tipo histológico, a técnica de fechamento (retalho/enxerto vs direto) tem OR ajustado de **%.1f** (IC95%%: %.1f–%.1f).\n\n",
+      or_fech_aj$estimate[1],
+      or_fech_aj$conf.low[1],
+      or_fech_aj$conf.high[1]
+    ))
+  }
+}
+```
+
+::: callout-tip
+## Agora em português brasileiro:
+
+Se o OR ajustado continua elevado e significativo, a técnica de fechamento é um preditor **independente** de complicação — não é só porque as lesões eram mais complexas.
+
+Se o OR cai ou perde significância, significa que a associação bruta era confundida por outras variáveis.
+
+Nossos achados indicam que enxertos e retalhos aumentam quase 5x a chance de complicação na nossa população de gente velha.
+:::
+
+------------------------------------------------------------------------
+
+# O URSO VOLTOU!!, ELE VOLTOU!!! {#sec-recorrencia}
+
+Dos `r nrow(pacientes)` pacientes, **`r sum(lesoes |> group_by(paciente) |> summarise(v = n_distinct(visita)) |> pull(v) == 2)`** tiveram uma segunda cirurgia (visita 2). Isso levanta algumas perguntas:
+
+-   Quem são esses pacientes que voltam?
+-   A segunda cirurgia complica mais?
+
+```{r}
+#| label: tbl-visitas
+#| tbl-cap: "Comparação entre visita 1 e visita 2"
+
+lesoes_visita <- lesoes_full |>
+  mutate(visita_label = factor(visita, c(1, 2), c("Primeira cirurgia", "Segunda cirurgia")))
+
+tbl_visita <- lesoes_visita |>
+  select(visita_label, teve_complicacao, margem_comprometida, tipo_label) |>
+  tbl_summary(
+    by = visita_label,
+    label = list(
+      teve_complicacao ~ "Complicação",
+      margem_comprometida ~ "Margem comprometida",
+      tipo_label ~ "Tipo histológico"
+    ),
+    statistic = all_categorical() ~ "{n} ({p}%)",
+    missing = "no"
+  ) |>
+  add_p(test = all_categorical() ~ "fisher.test")
+
+# >>> INSERIDO AQUI: patch ptbr (cabeçalho + rodapé Fisher)
+tbl_visita <- tbl_visita |>
+  gtsummary::modify_header(
+    label  ~ paste0("**", ptbr("Characteristic", "header"), "**"),
+    p.value ~ paste0("**", ptbr("p-value", "header"), "**")
+  ) |>
+  gtsummary::modify_footnote(
+    p.value ~ ptbr("Fisher's exact test", "footnote")
+  )
+# <<< FIM DO PATCH
+
+tbl_visita <- tbl_visita |>
+  bold_p(t = 0.05) |>
+  bold_labels()
+
+tbl_visita |>
+  as_gt() |>
+  gt::tab_header(
+    title = "Primeira vs segunda visitas",
+    subtitle = "Os que voltam são diferentes?"
+  )
+```
+
+```{r}
+#| label: fig-visita-complic
+#| fig-cap: "Taxa de complicação por visita"
+
+lesoes_visita |>
+  group_by(visita_label) |>
+  summarise(
+    n = n(),
+    compl = sum(teve_complicacao, na.rm = TRUE),
+    taxa = 100 * compl / n,
+    .groups = "drop"
+  ) |>
+  ggplot(aes(x = visita_label, y = taxa, fill = visita_label)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = sprintf("%.1f%%\n(n=%d)", taxa, compl)), vjust = -0.3, size = 4) +
+  scale_fill_manual(values = c("#2E86AB", "#A23B72"), guide = "none") +
+  scale_y_continuous(limits = c(0, 30), labels = \(x) paste0(x, "%")) +
+  labs(
+    x = NULL, y = "Taxa de complicação",
+    title = "A segunda cirurgia complica mais?",
+    subtitle = "Comparação entre primeira e segunda visita"
+  )
+```
+
+Essa análise é exploratória — o N é pequeno e os pacientes que voltam podem ser diferentes desde o início (viés de seleção).
+
+------------------------------------------------------------------------
+
+# Heatmaps 🔥🥵 {#sec-heatmaps}
+
+Heatmaps são ótimos pra visualizar padrões que tabelas podem esconder. Fiz alguns pra gente explorar juntooo.
+
+## Técnica de fechamento × Desfechos
+
+```{r}
+#| label: fig-heatmap-fech-desfechos
+#| fig-cap: "Heatmap de desfechos por técnica de fechamento"
+#| fig-width: 10
+#| fig-height: 5
+
+fech_levels <- c("Fechamento direto", "Enxerto", "Retalho", "Segunda intenção")
+
+fd <- lesoes_analise |>
+  mutate(fech_label = factor(fech_label, levels = fech_levels)) |>
+  filter(!is.na(fech_label)) |>
+  select(fech_label, teve_complicacao, margem_comprometida, teve_reintervencao)
+
+long <- fd |>
+  pivot_longer(
+    cols = c(teve_complicacao, margem_comprometida, teve_reintervencao),
+    names_to = "desfecho", values_to = "valor"
+  ) |>
+  mutate(
+    desfecho = factor(desfecho,
+      levels = c("teve_complicacao", "margem_comprometida", "teve_reintervencao"),
+      labels = c("Complicação", "Margem comprometida", "Reintervenção")
+    )
+  )
+
+heat_fd <- long |>
+  group_by(fech_label, desfecho) |>
+  summarise(
+    n_sim = sum(valor %in% TRUE, na.rm = TRUE),
+    n_denom = sum(!is.na(valor)),
+    pct = if_else(n_denom > 0, 100 * n_sim / n_denom, NA_real_),
+    label = if_else(n_denom > 0, sprintf("%d\n(%.0f%%)", n_sim, pct), ""),
+    .groups = "drop"
+  )
+
+heat_fd |>
+    ggplot(aes(x = desfecho, y = fech_label, fill = pct)) +
+    geom_tile(color = "white", linewidth = 0.6) +
+    geom_text(aes(label = label), size = 3.4) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradient(
+        low = "#f7f7f7",
+        high = "#E63946",
+        limits = c(0, 60),
+        breaks = c(0, 20, 40, 60),
+        labels = \(x) paste0(x, "%"),
+        na.value = "white") +
+    guides(
+        fill = guide_colorbar(
+            title.position = "top",
+            title.hjust = 0.5
+        )
+    ) +
+    labs(x = NULL, y = NULL, fill = "% de lesões com evento (na técnica)",
+       title = "Desfechos por técnica de fechamento",
+       subtitle = "Quanto mais vermelho, mais eventos (escala de 0 a 60% para melhorar visibilidade)") +
+    theme(
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(size = 10),
+        plot.subtitle = element_text(margin = margin(b = 24))
+        )
+```
+
+Olha como **retalho e enxerto** ficam mais "quentes" na coluna de complicação. Não é coincidência.
+
+## Subtipo de CBC × Margens
+
+```{r}
+#| label: fig-barra-subtipo-margens
+#| fig-cap: "CBC: margens por subtipo"
+#| fig-width: 10
+#| fig-height: 5
+
+
+```
+
+```{r}
+#| label: fig-divergente-cbc-margens
+#| fig-cap: "Margens por subtipo de CBC (barras divergentes)"
+#| fig-width: 9
+#| fig-height: 5
+
+# Preparar dados (filtro reforçado contra NA)
+cbc_margens <- lesoes |>
+  filter(tolower(histo_tipo) == "cbc") |>
+  mutate(
+    margem_status = case_when(
+      is.na(margens_ap) ~ NA_character_,
+      str_detect(margens_ap, "comprometida") ~ "Comprometidas",
+      margens_ap == "livres" ~ "Livres",
+      TRUE ~ NA_character_
+    ),
+    histo_subtipo = str_squish(as.character(histo_subtipo))
+  ) |>
+  filter(
+    !is.na(margem_status),
+    !is.na(histo_subtipo),
+    histo_subtipo != "",
+    histo_subtipo != "NA",
+    !str_detect(histo_subtipo, "^[Nn][Aa]$")
+  ) |>
+  separate_rows(histo_subtipo, sep = ",\\s*") |>
+  mutate(histo_subtipo = str_to_sentence(str_squish(histo_subtipo)))
+
+# Calcular contagens
+contagens <- cbc_margens |>
+  count(histo_subtipo, margem_status) |>
+  group_by(histo_subtipo) |>
+  mutate(
+    n_total = sum(n),
+    pct = 100 * n / n_total
+  ) |>
+  ungroup() |>
+  mutate(
+    # Livres vão pra esquerda (negativo), comprometidas pra direita
+    pct_plot = if_else(margem_status == "Livres", -pct, pct),
+    label = sprintf("%d (%.0f%%)", n, pct)
+  )
+
+# Ordenar por taxa de comprometimento (mais arriscado em cima)
+ordem <- contagens |>
+  filter(margem_status == "Comprometidas") |>
+  arrange(desc(pct)) |>
+  pull(histo_subtipo)
+
+# Adicionar subtipos sem comprometimento (taxa = 0)
+subtipos_sem_compr <- setdiff(unique(contagens$histo_subtipo), ordem)
+ordem <- c(ordem, subtipos_sem_compr)
+
+contagens <- contagens |>
+  mutate(histo_subtipo = factor(histo_subtipo, levels = rev(ordem)))
+
+# Gráfico divergente
+ggplot(contagens, aes(x = pct_plot, y = histo_subtipo, fill = margem_status)) +
+  geom_col(width = 0.7) +
+  geom_text(
+    aes(label = label),
+    hjust = if_else(contagens$margem_status == "Livres", 1.1, -0.1),
+    size = 3, color = "gray20"
+  ) +
+  geom_vline(xintercept = 0, color = "gray40", linewidth = 0.8) +
+  scale_x_continuous(
+    labels = \(x) paste0(abs(x), "%"),
+    limits = c(-110, 60)
+  ) +
+  scale_fill_manual(
+    values = c("Livres" = "#2A9D8F", "Comprometidas" = "#E63946"),
+    name = NULL
+  ) +
+  labs(
+    x = "Proporção (%)",
+    y = NULL,
+    title = "CBC: margens livres vs comprometidas por subtipo",
+    subtitle = "← Livres | Comprometidas →"
+  ) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    legend.position = "bottom"
+  )
+```
+
+------------------------------------------------------------------------
+
+# Síntese {#sec-sintese}
+
+```{r}
+#| label: resumo-final
+
+resumo <- tibble(
+  Indicador = c(
+    "Pacientes",
+    "Lesões",
+    "Idade mediana",
+    "Mulheres",
+    "CBC",
+    "Taxa de complicação",
+    "Margens comprometidas",
+    "Pacientes com 2ª cirurgia"
+  ),
+  Valor = c(
+    as.character(nrow(pacientes)),
+    as.character(nrow(lesoes)),
+    paste0(median(pacientes$idade), " anos"),
+    sprintf("%.0f%%", 100 * mean(pacientes$sexo == "f")),
+    sprintf("%.0f%%", pct_cbc),
+    sprintf("%.1f%%", 100 * n_compl / nrow(lesoes)),
+    sprintf("%.1f%%", 100 * n_marg / nrow(lesoes)),
+    as.character(sum(lesoes |> group_by(paciente) |> summarise(v = n_distinct(visita)) |> pull(v) == 2))
+  )
+)
+
+resumo |>
+  gt() |>
+  tab_header(title = "Resumão", subtitle = "Os números principais")
+```
+
+## O que parece importar?
+
+1.  **Técnica de fechamento:** Retalho e enxerto se associam a mais complicações. Faz sentido clinicamente — são procedimentos mais complexos, em lesões maiores.
+
+2.  **Subtipos agressivos de CBC:** Os infiltrativos/esclerodermiformes parecem ter mais margem comprometida, mas o N é pequeno pra cravar.
+
+3.  **Segunda cirurgia:** Os pacientes que voltam merecem atenção — pode haver um perfil de risco diferente.
+
+## Limitações (pra colocar na discussão)
+
+-   **N pequeno:** Com 7 margens comprometidas e 13 complicações, a gente tem poder estatístico limitado.
+-   **Dados correlacionados:** Pacientes com múltiplas lesões violam independência. Idealmente usaríamos GEE ou GLMM, mas o N não permite.
+-   **Viés de seleção:** Quem foi operado? Quem foi pra AP? Isso pode afetar os resultados.
+-   **Retrospectivo:** A qualidade dos dados depende do que foi registrado na época.
+
+## Perguntas que ficam
+
+-   Se tivesse mais casos, a associação subtipo agressivo → margem comprometida seria significativa?
+-   Os pacientes que voltam têm mais comorbidades? Lesões mais agressivas?
+-   Vale a pena estratificar por localização (face vs resto)?
+
+------------------------------------------------------------------------
+
+# O Que Falta Fazer
+
+-   [ ] Revisar os números com o orientador
+-   [ ] Decidir quais análises entram no artigo final
+-   [ ] Escrever a seção de métodos (essa parte descritiva já dá pra adiantar!)
+-   [ ] Pensar no título do trabalho 😎
+
+------------------------------------------------------------------------
+
+**Uma coisa importante:** tudo que está aqui é pra gente entender os dados. A narrativa final do artigo pode (e deve) ser mais... Sóbria. Mas agora a gente tem uma visão clara do que temos em mões
+
+Me conta o que tu achou!
+
+------------------------------------------------------------------------
+
+*Gerado em `r format(Sys.time(), "%d/%m/%Y às %H:%M")`*

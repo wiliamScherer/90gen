@@ -1,0 +1,29 @@
+.nicefrac {
+  display: inline-block;
+  font-size: 1.2em;      /* tamanho do conjunto */
+  line-height: 1.2;         /* evita “pular” a linha */
+  vertical-align: -0.05em;/* alinhamento com o texto */
+  white-space: nowrap;    /* não quebrar linha no meio */
+}
+
+.nicefrac sup,
+.nicefrac sub {
+  font-size: 0.70em;      /* tamanho relativo de num/den */
+  line-height: 1;
+}
+
+.nicefrac sup {
+  position: relative;
+  top: -0.36em;           /* sobe o numerador */
+}
+
+.nicefrac sub {
+  position: relative;
+  bottom: -0.15em;        /* desce o denominador */
+}
+
+.nicefrac .slash {
+  display: inline-block;
+  padding: 0 0.12em;      /* espaço ao redor do / */
+  transform: translateY(-0.02em); /* micro-ajuste vertical */
+}
