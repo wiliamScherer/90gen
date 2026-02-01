@@ -20,6 +20,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            libcairo2-dev \
             libfreetype6-dev \
             libharfbuzz-dev \
             libfribidi-dev \
@@ -38,6 +39,9 @@ jobs:
           r-version: "release"
 
       - uses: r-lib/actions/setup-renv@v2
+
+      - name: Restore R packages
+        run: Rscript -e 'renv::restore()'
 
       - name: Render
         env:
