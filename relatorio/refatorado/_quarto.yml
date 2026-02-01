@@ -1,0 +1,27 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "Cirurgias Dermatológicas em Nonagenários"
+  navbar: false
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver código"
+    fig-width: 8
+    fig-height: 5
+    fig-dpi: 150
+    css: styles.css
+
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: false
+  cache: false
