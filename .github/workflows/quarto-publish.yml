@@ -25,7 +25,11 @@ jobs:
             libfribidi-dev \
             libpng-dev \
             libfontconfig1-dev \
-            libnode-dev
+            libnode-dev \
+            libcurl4-openssl-dev \
+            libjpeg-dev \
+            libx11-dev \
+            pandoc
 
       - uses: quarto-dev/quarto-actions/setup@v2
 
